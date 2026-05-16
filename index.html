@@ -4,6 +4,12 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>💳 Finanzas Personales</title>
+  <meta name="theme-color" content="#020817"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="Finanzas"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <link rel="manifest" href="data:application/json,{&quot;name&quot;:&quot;Finanzas Personales&quot;,&quot;short_name&quot;:&quot;Finanzas&quot;,&quot;start_url&quot;:&quot;.&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;background_color&quot;:&quot;%23020817&quot;,&quot;theme_color&quot;:&quot;%23020817&quot;,&quot;icons&quot;:[{&quot;src&quot;:&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23020817'/%3E%3Ctext y='.9em' font-size='80' x='10'%3E%F0%9F%92%B3%3C/text%3E%3C/svg%3E&quot;,&quot;sizes&quot;:&quot;any&quot;,&quot;type&quot;:&quot;image/svg+xml&quot;}]}"/>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -874,6 +880,24 @@ function App() {
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+<script>
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    const sw = `
+      self.addEventListener('install', e => self.skipWaiting());
+      self.addEventListener('activate', e => e.waitUntil(clients.claim()));
+      self.addEventListener('fetch', e => {
+        if(e.request.mode === 'navigate'){
+          e.respondWith(fetch(e.request).catch(()=> caches.match('/mis-tarjetas/')));
+        }
+      });
+    `;
+    const blob = new Blob([sw], {type:'application/javascript'});
+    const url  = URL.createObjectURL(blob);
+    navigator.serviceWorker.register(url).catch(()=>{});
+  });
+}
 </script>
 </body>
 </html>
