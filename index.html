@@ -171,6 +171,19 @@ function App() {
   useEffect(()=>save("ft_savings", savings), [savings]);
   useEffect(()=>save("ft_month",   month),   [month]);
 
+  // -- auto sync to Drive (debounced 2s after any data change) --
+  const autoSyncRef = React.useRef(null);
+  useEffect(()=>{
+    if(autoSyncRef.current) clearTimeout(autoSyncRef.current);
+    autoSyncRef.current = setTimeout(async ()=>{
+      if(!driveToken) return; // only sync if already authenticated
+      setDriveStatus("syncing");
+      const ok = await saveToD({cards,expenses,incomes,savings});
+      setDriveStatus(ok?"ok":"error");
+      setTimeout(()=>setDriveStatus(""),2000);
+    }, 2000);
+  },[cards,expenses,incomes,savings]);
+
   // modal states
   const [showExp, setShowExp] = useState(false);
   const [showInc, setShowInc] = useState(false);
