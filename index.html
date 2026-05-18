@@ -15,6 +15,7 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700;900&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <style>
     body { font-family: 'DM Sans', sans-serif; background: #020817; color: white; margin: 0; }
@@ -33,6 +34,71 @@ const load = (key, fb) => { try { const v=localStorage.getItem(key); return v?JS
 const save = (key, val) => { try { localStorage.setItem(key,JSON.stringify(val)); } catch{} };
 const fmt  = (n) => "$"+Math.abs(Number(n)||0).toLocaleString("es-AR",{minimumFractionDigits:2,maximumFractionDigits:2});
 const uid  = () => Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+
+// -- Google Drive config --
+const CLIENT_ID   = "747153507636-l5keqc7r6j5nl9cj16f7ivj3ptcqkbpc.apps.googleusercontent.com";
+const SCOPES      = "https://www.googleapis.com/auth/drive.file";
+const FILE_NAME   = "finanzas-mis-tarjetas.json";
+
+let driveToken = null;
+
+const driveAuth = () => new Promise((resolve, reject) => {
+  const client = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPES,
+    callback: (resp) => {
+      if(resp.error){ reject(resp.error); return; }
+      driveToken = resp.access_token;
+      resolve(resp.access_token);
+    }
+  });
+  client.requestAccessToken();
+});
+
+const driveRequest = async (method, url, body=null) => {
+  const headers = { "Authorization": "Bearer "+driveToken };
+  if(body && !(body instanceof FormData)) headers["Content-Type"] = "application/json";
+  const res = await fetch(url, { method, headers, body: body instanceof FormData ? body : (body ? JSON.stringify(body) : null) });
+  return res.ok ? res.json() : null;
+};
+
+const findOrCreateFile = async () => {
+  const list = await driveRequest("GET", `https://www.googleapis.com/drive/v3/files?q=name='${FILE_NAME}' and trashed=false&fields=files(id,name)`);
+  if(list && list.files && list.files.length > 0) return list.files[0].id;
+  const meta = { name: FILE_NAME, mimeType: "application/json" };
+  const created = await driveRequest("POST", "https://www.googleapis.com/drive/v3/files", meta);
+  return created ? created.id : null;
+};
+
+const saveToD = async (data) => {
+  try {
+    await driveAuth();
+    const fileId = await findOrCreateFile();
+    if(!fileId) return false;
+    const form = new FormData();
+    form.append("metadata", new Blob([JSON.stringify({name:FILE_NAME,mimeType:"application/json"})],{type:"application/json"}));
+    form.append("file", new Blob([JSON.stringify(data)],{type:"application/json"}));
+    await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`, {
+      method: "PATCH",
+      headers: { "Authorization": "Bearer "+driveToken },
+      body: form
+    });
+    return true;
+  } catch(e){ return false; }
+};
+
+const loadFromD = async () => {
+  try {
+    await driveAuth();
+    const list = await driveRequest("GET", `https://www.googleapis.com/drive/v3/files?q=name='${FILE_NAME}' and trashed=false&fields=files(id,name)`);
+    if(!list || !list.files || list.files.length === 0) return null;
+    const fileId = list.files[0].id;
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+      headers: { "Authorization": "Bearer "+driveToken }
+    });
+    return res.ok ? res.json() : null;
+  } catch(e){ return null; }
+};
 
 const DEFAULT_CARDS = [
   {id:"nbsf",      name:"NBSF",      last4:"9969", color:"#22c55e", vto:"5/6/2026",  cierre:"28/5/2026"},
@@ -97,6 +163,7 @@ function App() {
   const [expenses, setExpenses] = useState(()=>load("ft_expenses",[]));
   const [incomes,  setIncomes]  = useState(()=>load("ft_incomes",[]));
   const [savings,  setSavings]  = useState(()=>load("ft_savings",[]));
+  const [driveStatus, setDriveStatus] = useState(""); // "", "syncing", "ok", "error"
 
   useEffect(()=>save("ft_cards",   cards),   [cards]);
   useEffect(()=>save("ft_expenses",expenses),[expenses]);
@@ -262,6 +329,28 @@ function App() {
   const clearAll=()=>{
     if(!confirm("¿Borrar TODOS los datos? No se puede deshacer."))return;
     setExpenses([]);setIncomes([]);setSavings([]);
+  };
+
+  const syncToDrive = async () => {
+    setDriveStatus("syncing");
+    const ok = await saveToD({cards,expenses,incomes,savings});
+    setDriveStatus(ok?"ok":"error");
+    setTimeout(()=>setDriveStatus(""),3000);
+  };
+
+  const syncFromDrive = async () => {
+    setDriveStatus("syncing");
+    const data = await loadFromD();
+    if(data){
+      if(data.cards)    setCards(data.cards);
+      if(data.expenses) setExpenses(data.expenses);
+      if(data.incomes)  setIncomes(data.incomes);
+      if(data.savings)  setSavings(data.savings);
+      setDriveStatus("ok");
+    } else {
+      setDriveStatus("error");
+    }
+    setTimeout(()=>setDriveStatus(""),3000);
   };
 
   const exportExcel=()=>{
@@ -502,7 +591,15 @@ function App() {
               style={{padding:"6px 12px",borderRadius:10,fontSize:11,fontWeight:700,background:"rgba(15,118,110,.5)",color:"#5eead4",border:"1px solid rgba(15,118,110,.5)",cursor:"pointer"}}>
               + Tarjeta
             </button>
-            <div style={{borderLeft:"1px solid #1e293b",paddingLeft:6,display:"flex",gap:4}}>
+            <div style={{borderLeft:"1px solid #1e293b",paddingLeft:6,display:"flex",gap:4,alignItems:"center"}}>
+              <button title="Guardar en Drive" onClick={syncToDrive}
+                style={{padding:"6px 8px",borderRadius:8,fontSize:11,fontWeight:700,background:driveStatus==="ok"?"#14532d":driveStatus==="error"?"#450a0a":"#1e3a5f",color:driveStatus==="ok"?"#86efac":driveStatus==="error"?"#fca5a5":"#93c5fd",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>
+                {driveStatus==="syncing"?"...":`☁️ Drive`}
+              </button>
+              <button title="Cargar desde Drive" onClick={syncFromDrive}
+                style={{padding:"6px 8px",borderRadius:8,fontSize:11,fontWeight:700,background:"#1e3a5f",color:"#93c5fd",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>
+                {driveStatus==="syncing"?"...":"⬇️ Drive"}
+              </button>
               <button title="Exportar backup" onClick={exportData} style={{padding:"6px 8px",borderRadius:8,fontSize:12,background:"#1e293b",color:"#94a3b8",border:"none",cursor:"pointer"}}>⬇️</button>
               <button title="Exportar Excel" onClick={exportExcel} style={{padding:"6px 8px",borderRadius:8,fontSize:12,background:"#14532d",color:"#86efac",border:"none",cursor:"pointer",fontWeight:700}}>📊 XLS</button>
               <label title="Importar backup" style={{padding:"6px 8px",borderRadius:8,fontSize:12,background:"#1e293b",color:"#94a3b8",cursor:"pointer",display:"inline-block"}}>
