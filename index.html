@@ -40,20 +40,31 @@ const CLIENT_ID   = "747153507636-l5keqc7r6j5nl9cj16f7ivj3ptcqkbpc.apps.googleus
 const SCOPES      = "https://www.googleapis.com/auth/drive.file";
 const FILE_NAME   = "finanzas-mis-tarjetas.json";
 
-let driveToken = null;
+let driveToken    = null;
+let tokenExpiry   = 0;
+let authPromise   = null;
 
-const driveAuth = () => new Promise((resolve, reject) => {
-  const client = google.accounts.oauth2.initTokenClient({
-    client_id: CLIENT_ID,
-    scope: SCOPES,
-    callback: (resp) => {
-      if(resp.error){ reject(resp.error); return; }
-      driveToken = resp.access_token;
-      resolve(resp.access_token);
-    }
+const driveAuth = () => {
+  // si ya tenemos token valido, lo reutilizamos
+  if(driveToken && Date.now() < tokenExpiry) return Promise.resolve(driveToken);
+  // si ya hay una autenticacion en curso, esperamos esa misma
+  if(authPromise) return authPromise;
+  authPromise = new Promise((resolve, reject) => {
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID,
+      scope: SCOPES,
+      callback: (resp) => {
+        authPromise = null;
+        if(resp.error){ reject(resp.error); return; }
+        driveToken  = resp.access_token;
+        tokenExpiry = Date.now() + (resp.expires_in - 60) * 1000; // renovar 1 min antes
+        resolve(driveToken);
+      }
+    });
+    client.requestAccessToken({prompt: driveToken ? "" : "consent"});
   });
-  client.requestAccessToken();
-});
+  return authPromise;
+};
 
 const driveRequest = async (method, url, body=null) => {
   const headers = { "Authorization": "Bearer "+driveToken };
