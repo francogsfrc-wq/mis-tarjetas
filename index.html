@@ -32,7 +32,9 @@ const { useState, useMemo, useEffect } = React;
 
 const load = (key, fb) => { try { const v=localStorage.getItem(key); return v?JSON.parse(v):fb; } catch{return fb;} };
 const save = (key, val) => { try { localStorage.setItem(key,JSON.stringify(val)); } catch{} };
-const fmt  = (n) => "$"+Math.abs(Number(n)||0).toLocaleString("es-AR",{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmt    = (n) => "$"+Math.abs(Number(n)||0).toLocaleString("es-AR",{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtUSD = (n) => "U$D "+Math.abs(Number(n)||0).toLocaleString("es-AR",{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtM   = (n, moneda) => moneda==="USD" ? fmtUSD(n) : fmt(n);
 const uid  = () => Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 
 // -- Google Drive config --
@@ -206,9 +208,9 @@ function App() {
   const [editCardId, setEditCardId] = useState(null);
 
   const bCard=()=>({name:"",last4:"",color:CARD_COLORS[cards.length%CARD_COLORS.length],vto:"",cierre:""});
-  const bExp =()=>({cardId:cards[0]?.id??"",concepto:"",categoria:"Otro",      importe:"",cuotas:1,tipo:"propio",  month});
-  const bInc =()=>({                        concepto:"",categoria:"Sueldo",    importe:"",                        month});
-  const bSav =()=>({                        concepto:"",categoria:"Plazo fijo",importe:"",accion:"deposito",      month});
+  const bExp =()=>({cardId:cards[0]?.id??"",concepto:"",categoria:"Otro",importe:"",cuotas:1,tipo:"propio",moneda:"ARS",month});
+  const bInc =()=>({concepto:"",categoria:"Sueldo",importe:"",month});
+  const bSav =()=>({concepto:"",categoria:"Plazo fijo",importe:"",accion:"deposito",month});
 
   const [cardF,setCardF]=useState(bCard());
   const [expF, setExpF] =useState(bExp());
@@ -226,22 +228,34 @@ function App() {
 
   const tCard = useMemo(()=>{
     const m={}; cards.forEach(c=>(m[c.id]=0));
-    mExp.forEach(e=>{ if(m[e.cardId]!==undefined) m[e.cardId]+=(Number(e.importe)||0); });
+    mExp.filter(e=>e.moneda!=="USD").forEach(e=>{ if(m[e.cardId]!==undefined) m[e.cardId]+=(Number(e.importe)||0); });
     return m;
   },[mExp,cards]);
 
-  const tGastos = Object.values(tCard).reduce((a,b)=>a+b,0);
-  const tPareja = pareja.reduce((a,e)=>a+(Number(e.importe)||0),0);
-  const tPapa   = papa.reduce((a,e)=>a+(Number(e.importe)||0),0);
-  const tCargo  = tGastos - tPareja/2 - tPapa;
-  const tInc    = mInc.reduce((a,i)=>a+(Number(i.importe)||0),0);
-  const tDep    = mSav.filter(s=>s.accion==="deposito").reduce((a,s)=>a+(Number(s.importe)||0),0);
-  const tRet    = mSav.filter(s=>s.accion==="retiro").reduce((a,s)=>a+(Number(s.importe)||0),0);
-  const tAhorro = tDep-tRet;
-  const disp    = tInc-tCargo-tAhorro;
-  const ok      = disp>=0;
-  const pctG    = tInc>0?Math.min(100,tCargo/tInc*100):0;
-  const pctA    = tInc>0?Math.min(100,Math.abs(tAhorro)/tInc*100):0;
+  const tCardUSD = useMemo(()=>{
+    const m={}; cards.forEach(c=>(m[c.id]=0));
+    mExp.filter(e=>e.moneda==="USD").forEach(e=>{ if(m[e.cardId]!==undefined) m[e.cardId]+=(Number(e.importe)||0); });
+    return m;
+  },[mExp,cards]);
+
+  const mExpARS  = mExp.filter(e=>e.moneda!=="USD");
+  const mExpUSD  = mExp.filter(e=>e.moneda==="USD");
+  const tGastos  = Object.values(tCard).reduce((a,b)=>a+b,0);
+  const tGastosUSD = Object.values(tCardUSD).reduce((a,b)=>a+b,0);
+  const tPareja  = pareja.filter(e=>e.moneda!=="USD").reduce((a,e)=>a+(Number(e.importe)||0),0);
+  const tParejaUSD = pareja.filter(e=>e.moneda==="USD").reduce((a,e)=>a+(Number(e.importe)||0),0);
+  const tPapa    = papa.filter(e=>e.moneda!=="USD").reduce((a,e)=>a+(Number(e.importe)||0),0);
+  const tPapaUSD = papa.filter(e=>e.moneda==="USD").reduce((a,e)=>a+(Number(e.importe)||0),0);
+  const tCargo   = tGastos - tPareja/2 - tPapa;
+  const tCargoUSD= tGastosUSD - tParejaUSD/2 - tPapaUSD;
+  const tInc     = mInc.reduce((a,i)=>a+(Number(i.importe)||0),0);
+  const tDep     = mSav.filter(s=>s.accion==="deposito").reduce((a,s)=>a+(Number(s.importe)||0),0);
+  const tRet     = mSav.filter(s=>s.accion==="retiro").reduce((a,s)=>a+(Number(s.importe)||0),0);
+  const tAhorro  = tDep-tRet;
+  const disp     = tInc-tCargo-tAhorro;
+  const ok       = disp>=0;
+  const pctG     = tInc>0?Math.min(100,tCargo/tInc*100):0;
+  const pctA     = tInc>0?Math.min(100,Math.abs(tAhorro)/tInc*100):0;
 
   // CRUD -- expenses/incomes/savings
   const subExp=()=>{
@@ -517,7 +531,7 @@ function App() {
         </div>
         <div style={{fontSize:11,color:"#94a3b8"}}>{e.cuotaTotal>1?`${e.cuotaNum}/${e.cuotaTotal}`:"Contado"}</div>
         <span style={{fontSize:10,padding:"3px 7px",borderRadius:999,fontWeight:700,background:tipoBg[e.tipo]+"99",color:tipoTx[e.tipo],whiteSpace:"nowrap"}}>{tipoLb[e.tipo]}</span>
-        <div style={{fontSize:13,fontWeight:700,color:"#f87171",textAlign:"right"}}>{fmt(e.importe)}</div>
+        <div style={{fontSize:13,fontWeight:700,color:e.moneda==="USD"?"#34d399":"#f87171",textAlign:"right"}}>{fmtM(e.importe,e.moneda)}</div>
         <div style={{display:"flex",gap:4}}>
           <button onClick={()=>{setExpF({...e});setEditExpId(e.id);setShowExp(true);}} style={{padding:"5px 6px",borderRadius:8,background:"#1e293b",border:"none",cursor:"pointer",fontSize:11}}>✏️</button>
           <button onClick={()=>delExp(e.id)} style={{padding:"5px 6px",borderRadius:8,background:"#450a0a55",border:"none",cursor:"pointer",fontSize:11}}>🗑️</button>
@@ -659,6 +673,7 @@ function App() {
                 <span style={{fontSize:10,color:"#475569",fontFamily:"DM Mono,monospace"}}>···{c.last4}</span>
               </div>
               <div style={{fontSize:17,fontWeight:900,color:c.color}}>{fmt(tCard[c.id]??0)}</div>
+              {(tCardUSD[c.id]??0)>0&&<div style={{fontSize:12,fontWeight:700,color:"#34d399"}}>{fmtUSD(tCardUSD[c.id])}</div>}
               <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid #1e293b"}}>
                 <div style={{fontSize:10,color:"#475569"}}>Cierre <span style={{color:"#64748b"}}>{c.cierre||"--"}</span></div>
                 <div style={{fontSize:10,color:"#475569"}}>Vence <span style={{color:"#64748b"}}>{c.vto||"--"}</span></div>
@@ -956,6 +971,13 @@ function App() {
           </div>
         </div>
         <FInput label="Concepto" value={expF.concepto} onChange={e=>setExpF(f=>({...f,concepto:e.target.value}))} placeholder="Ej: SANCOR SEGURO"/>
+        <div>
+          <div style={{fontSize:10,color:"#64748b",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Moneda</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+            <TogBtn active={expF.moneda==="ARS"} color="#f87171" onClick={()=>setExpF(f=>({...f,moneda:"ARS"}))}>$ Pesos</TogBtn>
+            <TogBtn active={expF.moneda==="USD"} color="#34d399" onClick={()=>setExpF(f=>({...f,moneda:"USD"}))}>U$D Dólares</TogBtn>
+          </div>
+        </div>
         <FSelect label="Categoría" options={EXPENSE_CATS} value={expF.categoria} onChange={e=>setExpF(f=>({...f,categoria:e.target.value}))}/>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           <FInput label="Importe ($)" type="number" value={expF.importe} onChange={e=>setExpF(f=>({...f,importe:e.target.value}))} placeholder="0.00"/>
